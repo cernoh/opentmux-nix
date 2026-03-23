@@ -3,11 +3,6 @@
 # Builds the opentmux Node.js package from the local TypeScript source using
 # buildNpmPackage. The resulting derivation provides the `opentmux` binary.
 #
-# NOTE: The `npmDepsHash` below is a placeholder. To obtain the real hash:
-#   1. Set npmDepsHash = lib.fakeHash; and attempt to build.
-#   2. Copy the correct hash from the error output.
-#   3. Replace the placeholder with the correct hash.
-#
 # Alternatively, run:
 #   nix run nixpkgs#prefetch-npm-deps -- path/to/package-lock.json
 
@@ -29,7 +24,7 @@ buildNpmPackage {
 
   # Hash of the fetched npm dependency closure.  Replace with the real hash
   # after a first failed build (see note above).
-  npmDepsHash = lib.fakeHash;
+  npmDepsHash = sha256-IryEQT3tJhDai7lUC5m4vvAcJnjpyatwA36KCOFinfs=;
 
   # buildNpmPackage already passes --ignore-scripts during the offline install
   # step, which prevents the postinstall script from attempting to modify the
