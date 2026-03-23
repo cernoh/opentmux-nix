@@ -71,6 +71,111 @@ To install this plugin, please perform the following steps for the user:
 3.  **Run OpenCode:**
     Restart your terminal and type `opencode`. The plugin handles the rest!
 
+## ❄️ Nix / Home-Manager
+
+This repository ships a Nix flake that packages `opentmux` and exposes a
+[home-manager](https://github.com/nix-community/home-manager) module so you can
+declaratively configure the plugin alongside the rest of your dotfiles.
+
+### Quick start
+
+Add the flake to your inputs and import the module:
+
+```nix
+# flake.nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    opentmux = {
+      url = "github:cernoh/opentmux-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { nixpkgs, home-manager, opentmux, ... }: {
+    homeConfigurations."you@host" = home-manager.lib.homeManagerConfiguration {
+      pkgs = import nixpkgs { system = "x86_64-linux"; };
+
+      # Apply the overlay so pkgs.opentmux is available.
+      extraSpecialArgs = { inherit opentmux; };
+
+      modules = [
+        # 1. Apply the package overlay
+        { nixpkgs.overlays = [ opentmux.overlays.default ]; }
+
+        # 2. Import the home-manager module
+        opentmux.homeManagerModules.default
+
+        # 3. Your config
+        {
+          programs.opentmux = {
+            enable = true;
+            layout = "main-vertical";
+            enableShellAlias = true;   # aliases `opencode` → `opentmux`
+          };
+        }
+      ];
+    };
+  };
+}
+```
+
+Then run:
+
+```bash
+home-manager switch --flake .#you@host
+```
+
+### Module options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enable` | bool | — | Enable the module (required) |
+| `package` | package | `pkgs.opentmux` | Package to install |
+| `enabled` | bool | `true` | Enable tmux integration |
+| `port` | port | `4096` | OpenCode server port |
+| `layout` | enum | `"main-vertical"` | Tmux layout (`main-horizontal`, `main-vertical`, `tiled`, `even-horizontal`, `even-vertical`) |
+| `mainPaneSize` | int (20–80) | `60` | Percentage of the window for the main pane |
+| `autoClose` | bool | `true` | Close panes automatically when sessions end |
+| `spawnDelayMs` | int (50–2000) | `300` | Delay between pane spawns (ms) |
+| `maxRetryAttempts` | int (0–5) | `2` | Spawn retry limit |
+| `layoutDebounceMs` | int (50–1000) | `150` | Layout re-apply debounce (ms) |
+| `maxAgentsPerColumn` | int (1–10) | `3` | Max agent panes per column |
+| `reaperEnabled` | bool | `true` | Enable zombie-process reaper |
+| `reaperIntervalMs` | int | `30000` | Reaper scan interval (ms) |
+| `reaperMinZombieChecks` | int | `3` | Scans before a zombie is killed |
+| `reaperGracePeriodMs` | int | `5000` | Grace period before kill (ms) |
+| `reaperAutoSelfDestruct` | bool | `true` | Self-destruct idle servers |
+| `reaperSelfDestructTimeoutMs` | int | `3600000` | Idle timeout before self-destruct (ms) |
+| `rotatePort` | bool | `false` | Recycle oldest session when no port is free |
+| `maxPorts` | int (1–100) | `10` | Number of ports to scan |
+| `enableShellAlias` | bool | `false` | Add `opencode = opentmux` shell alias |
+| `shellAliasName` | string | `"opencode"` | Name of the shell alias |
+| `extraSettings` | attrs | `{}` | Extra keys merged into `opentmux.json` |
+
+The module writes the configuration to `~/.config/opencode/opentmux.json`
+(managed via `xdg.configFile`).
+
+### Building the package standalone
+
+```bash
+nix build github:cernoh/opentmux-nix
+./result/bin/opentmux --help
+```
+
+> **First-time contributors:** The `npmDepsHash` in `nix/package.nix` is set to
+> `lib.fakeHash` so the file is self-documenting. Replace it with the correct
+> hash shown in the build error after your first `nix build` attempt, or run:
+>
+> ```bash
+> nix run nixpkgs#prefetch-npm-deps -- package-lock.json
+> ```
+
 ## 🛠️ Development
 
 For contributors working on this plugin locally, see [LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) for setup instructions.
