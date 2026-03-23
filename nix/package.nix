@@ -24,7 +24,7 @@ buildNpmPackage {
 
   # Hash of the fetched npm dependency closure.  Replace with the real hash
   # after a first failed build (see note above).
-  npmDepsHash = sha256-IryEQT3tJhDai7lUC5m4vvAcJnjpyatwA36KCOFinfs=;
+  npmDepsHash = "sha256-IryEQT3tJhDai7lUC5m4vvAcJnjpyatwA36KCOFinfs=";
 
   # buildNpmPackage already passes --ignore-scripts during the offline install
   # step, which prevents the postinstall script from attempting to modify the
