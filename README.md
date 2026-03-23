@@ -71,6 +71,223 @@ To install this plugin, please perform the following steps for the user:
 3.  **Run OpenCode:**
     Restart your terminal and type `opencode`. The plugin handles the rest!
 
+## ❄️ Nix / Home-Manager
+
+This repository ships a Nix flake that packages `opentmux` and exposes a
+[home-manager](https://github.com/nix-community/home-manager) module so you can
+declaratively configure the plugin alongside the rest of your dotfiles.
+
+### Prerequisites
+
+Before you begin, make sure you have:
+
+- **Nix** with [flakes enabled](https://nixos.wiki/wiki/Flakes)
+  (`experimental-features = nix-command flakes` in `nix.conf` or `/etc/nix/nix.conf`)
+- **tmux** available in your environment (`nixpkgs.tmux`, or `programs.tmux.enable = true`)
+- **OpenCode** installed (`opencode` binary reachable in your PATH)
+- An existing **home-manager** configuration (standalone *or* NixOS module — both patterns are shown below)
+
+---
+
+### Pattern A — Standalone home-manager
+
+Use this if you run `home-manager switch` independently of NixOS
+(e.g. on macOS with nix-darwin, or on Linux without NixOS).
+
+**Step 1 — Add the flake input**
+
+```nix
+# flake.nix
+{
+  inputs = {
+    nixpkgs.url     = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager    = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    opentmux = {
+      url = "github:cernoh/opentmux-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { nixpkgs, home-manager, opentmux, ... }: {
+    homeConfigurations."youruser@yourhostname" =
+      home-manager.lib.homeManagerConfiguration {
+        pkgs = import nixpkgs { system = "x86_64-linux"; }; # adjust system as needed
+
+        modules = [
+          # 1. Make pkgs.opentmux available
+          { nixpkgs.overlays = [ opentmux.overlays.default ]; }
+
+          # 2. Import the home-manager module
+          opentmux.homeManagerModules.default
+
+          # 3. Enable and configure the plugin
+          {
+            programs.opentmux = {
+              enable           = true;
+              layout           = "main-vertical"; # see Module options below
+              enableShellAlias = true;             # adds alias: opencode → opentmux
+            };
+          }
+        ];
+      };
+  };
+}
+```
+
+**Step 2 — Apply the configuration**
+
+```bash
+home-manager switch --flake .#youruser@yourhostname
+```
+
+---
+
+### Pattern B — NixOS with home-manager as a NixOS module
+
+Use this if home-manager is imported as a NixOS module inside your
+`nixosConfigurations`.
+
+```nix
+# flake.nix
+{
+  inputs = {
+    nixpkgs.url     = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager    = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    opentmux = {
+      url = "github:cernoh/opentmux-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { nixpkgs, home-manager, opentmux, ... }: {
+    nixosConfigurations.yourhostname = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        # Make pkgs.opentmux available system-wide
+        { nixpkgs.overlays = [ opentmux.overlays.default ]; }
+
+        home-manager.nixosModules.home-manager
+        {
+          home-manager.users.youruser = { pkgs, ... }: {
+            imports = [ opentmux.homeManagerModules.default ];
+
+            programs.opentmux = {
+              enable           = true;
+              layout           = "main-vertical";
+              enableShellAlias = true;
+            };
+          };
+        }
+
+        ./configuration.nix  # your existing NixOS config
+      ];
+    };
+  };
+}
+```
+
+**Step 2 — Rebuild your system**
+
+```bash
+sudo nixos-rebuild switch --flake .#yourhostname
+```
+
+---
+
+### Step 3 — Register the plugin with OpenCode (required for both patterns)
+
+The Nix module installs the `opentmux` binary and writes the plugin config
+file, but OpenCode itself must be told to load the plugin.  Edit
+`~/.config/opencode/opencode.json` and add `"opentmux"` to the `plugin`
+array:
+
+```json
+{
+  "plugin": [
+    "opentmux"
+  ]
+}
+```
+
+> **Note:** This file is not managed by the Nix module intentionally — you
+> likely have other OpenCode settings there that should remain under your own
+> control.
+
+---
+
+### Step 4 — Verify the installation
+
+1. Open a new terminal (so the shell alias takes effect if you enabled it).
+2. Start a tmux session if you are not already inside one:
+   ```bash
+   tmux
+   ```
+3. Launch OpenCode:
+   ```bash
+   opencode   # or `opentmux` directly if you did not enable the alias
+   ```
+4. When an agent spawns a sub-session you will see a new tmux pane appear
+   automatically, running `opencode attach` for that session.
+5. If nothing appears, check the log for errors:
+   ```bash
+   cat /tmp/opentmux.log
+   ```
+
+---
+
+### Module options
+
+All options live under `programs.opentmux`.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enable` | bool | — | Enable the module (required) |
+| `package` | package | `pkgs.opentmux` | Package to install |
+| `enabled` | bool | `true` | Enable tmux integration |
+| `port` | port | `4096` | OpenCode server port |
+| `layout` | enum | `"main-vertical"` | Tmux layout (`main-horizontal`, `main-vertical`, `tiled`, `even-horizontal`, `even-vertical`) |
+| `mainPaneSize` | int (20–80) | `60` | Percentage of the window for the main pane |
+| `autoClose` | bool | `true` | Close panes automatically when sessions end |
+| `spawnDelayMs` | int (50–2000) | `300` | Delay between pane spawns (ms) |
+| `maxRetryAttempts` | int (0–5) | `2` | Spawn retry limit |
+| `layoutDebounceMs` | int (50–1000) | `150` | Layout re-apply debounce (ms) |
+| `maxAgentsPerColumn` | int (1–10) | `3` | Max agent panes per column |
+| `reaperEnabled` | bool | `true` | Enable zombie-process reaper |
+| `reaperIntervalMs` | int | `30000` | Reaper scan interval (ms) |
+| `reaperMinZombieChecks` | int | `3` | Scans before a zombie is killed |
+| `reaperGracePeriodMs` | int | `5000` | Grace period before kill (ms) |
+| `reaperAutoSelfDestruct` | bool | `true` | Self-destruct idle servers |
+| `reaperSelfDestructTimeoutMs` | int | `3600000` | Idle timeout before self-destruct (ms) |
+| `rotatePort` | bool | `false` | Recycle oldest session when no port is free |
+| `maxPorts` | int (1–100) | `10` | Number of ports to scan |
+| `enableShellAlias` | bool | `false` | Add `opencode = opentmux` shell alias |
+| `shellAliasName` | string | `"opencode"` | Name of the shell alias |
+| `extraSettings` | attrs | `{}` | Extra keys merged into `opentmux.json` |
+
+The module writes the configuration to `~/.config/opencode/opentmux.json`
+(managed via `xdg.configFile`).
+
+### Building the package standalone
+
+```bash
+nix build github:cernoh/opentmux-nix
+./result/bin/opentmux --help
+```
+
+> **Note for contributors:** The `npmDepsHash` in `nix/package.nix` is set to
+> `lib.fakeHash` so the file is self-documenting. Replace it with the correct
+> hash shown in the build error after your first `nix build` attempt, or run:
+>
+> ```bash
+> nix run nixpkgs#prefetch-npm-deps -- package-lock.json
+> ```
+
 ## 🛠️ Development
 
 For contributors working on this plugin locally, see [LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) for setup instructions.
