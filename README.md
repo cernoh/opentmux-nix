@@ -77,20 +77,34 @@ This repository ships a Nix flake that packages `opentmux` and exposes a
 [home-manager](https://github.com/nix-community/home-manager) module so you can
 declaratively configure the plugin alongside the rest of your dotfiles.
 
-### Quick start
+### Prerequisites
 
-Add the flake to your inputs and import the module:
+Before you begin, make sure you have:
+
+- **Nix** with [flakes enabled](https://nixos.wiki/wiki/Flakes)
+  (`experimental-features = nix-command flakes` in `nix.conf` or `/etc/nix/nix.conf`)
+- **tmux** available in your environment (`nixpkgs.tmux`, or `programs.tmux.enable = true`)
+- **OpenCode** installed (`opencode` binary reachable in your PATH)
+- An existing **home-manager** configuration (standalone *or* NixOS module — both patterns are shown below)
+
+---
+
+### Pattern A — Standalone home-manager
+
+Use this if you run `home-manager switch` independently of NixOS
+(e.g. on macOS with nix-darwin, or on Linux without NixOS).
+
+**Step 1 — Add the flake input**
 
 ```nix
 # flake.nix
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    home-manager = {
+    nixpkgs.url     = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager    = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-
     opentmux = {
       url = "github:cernoh/opentmux-nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -98,40 +112,138 @@ Add the flake to your inputs and import the module:
   };
 
   outputs = { nixpkgs, home-manager, opentmux, ... }: {
-    homeConfigurations."you@host" = home-manager.lib.homeManagerConfiguration {
-      pkgs = import nixpkgs { system = "x86_64-linux"; };
+    homeConfigurations."youruser@yourhostname" =
+      home-manager.lib.homeManagerConfiguration {
+        pkgs = import nixpkgs { system = "x86_64-linux"; }; # adjust system as needed
 
-      # Apply the overlay so pkgs.opentmux is available.
-      extraSpecialArgs = { inherit opentmux; };
+        modules = [
+          # 1. Make pkgs.opentmux available
+          { nixpkgs.overlays = [ opentmux.overlays.default ]; }
 
+          # 2. Import the home-manager module
+          opentmux.homeManagerModules.default
+
+          # 3. Enable and configure the plugin
+          {
+            programs.opentmux = {
+              enable           = true;
+              layout           = "main-vertical"; # see Module options below
+              enableShellAlias = true;             # adds alias: opencode → opentmux
+            };
+          }
+        ];
+      };
+  };
+}
+```
+
+**Step 2 — Apply the configuration**
+
+```bash
+home-manager switch --flake .#youruser@yourhostname
+```
+
+---
+
+### Pattern B — NixOS with home-manager as a NixOS module
+
+Use this if home-manager is imported as a NixOS module inside your
+`nixosConfigurations`.
+
+```nix
+# flake.nix
+{
+  inputs = {
+    nixpkgs.url     = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager    = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    opentmux = {
+      url = "github:cernoh/opentmux-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { nixpkgs, home-manager, opentmux, ... }: {
+    nixosConfigurations.yourhostname = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
       modules = [
-        # 1. Apply the package overlay
+        # Make pkgs.opentmux available system-wide
         { nixpkgs.overlays = [ opentmux.overlays.default ]; }
 
-        # 2. Import the home-manager module
-        opentmux.homeManagerModules.default
-
-        # 3. Your config
+        home-manager.nixosModules.home-manager
         {
-          programs.opentmux = {
-            enable = true;
-            layout = "main-vertical";
-            enableShellAlias = true;   # aliases `opencode` → `opentmux`
+          home-manager.users.youruser = { pkgs, ... }: {
+            imports = [ opentmux.homeManagerModules.default ];
+
+            programs.opentmux = {
+              enable           = true;
+              layout           = "main-vertical";
+              enableShellAlias = true;
+            };
           };
         }
+
+        ./configuration.nix  # your existing NixOS config
       ];
     };
   };
 }
 ```
 
-Then run:
+**Step 2 — Rebuild your system**
 
 ```bash
-home-manager switch --flake .#you@host
+sudo nixos-rebuild switch --flake .#yourhostname
 ```
 
+---
+
+### Step 3 — Register the plugin with OpenCode (required for both patterns)
+
+The Nix module installs the `opentmux` binary and writes the plugin config
+file, but OpenCode itself must be told to load the plugin.  Edit
+`~/.config/opencode/opencode.json` and add `"opentmux"` to the `plugin`
+array:
+
+```json
+{
+  "plugin": [
+    "opentmux"
+  ]
+}
+```
+
+> **Note:** This file is not managed by the Nix module intentionally — you
+> likely have other OpenCode settings there that should remain under your own
+> control.
+
+---
+
+### Step 4 — Verify the installation
+
+1. Open a new terminal (so the shell alias takes effect if you enabled it).
+2. Start a tmux session if you are not already inside one:
+   ```bash
+   tmux
+   ```
+3. Launch OpenCode:
+   ```bash
+   opencode   # or `opentmux` directly if you did not enable the alias
+   ```
+4. When an agent spawns a sub-session you will see a new tmux pane appear
+   automatically, running `opencode attach` for that session.
+5. If nothing appears, check the log for errors:
+   ```bash
+   cat /tmp/opentmux.log
+   ```
+
+---
+
 ### Module options
+
+All options live under `programs.opentmux`.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -168,7 +280,7 @@ nix build github:cernoh/opentmux-nix
 ./result/bin/opentmux --help
 ```
 
-> **First-time contributors:** The `npmDepsHash` in `nix/package.nix` is set to
+> **Note for contributors:** The `npmDepsHash` in `nix/package.nix` is set to
 > `lib.fakeHash` so the file is self-documenting. Replace it with the correct
 > hash shown in the build error after your first `nix build` attempt, or run:
 >
